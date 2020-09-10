@@ -1,0 +1,12 @@
+desc: This will create an ami with aws
+release: 0.0.1
+categories: 
+   - aws
+   - ami
+tags:
+   - aws
+   - ami
+   - ec2
+   - ami
+   - images
+   - imaging

@@ -1,0 +1,15 @@
+desc: The stack that creates an ecr repo for docker images
+release: 0.0.1
+categories: 
+   - aws
+   - cloud
+   - public_cloud
+tags:
+   - aws
+   - infrastructure
+   - ecr_repo
+   - ecr
+   - registry
+   - docker
+   - repository
+   - public_cloud

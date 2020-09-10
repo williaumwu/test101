@@ -1,0 +1,19 @@
+desc: The stack that creates subnets for a vpc_name
+release: 0.0.1
+categories: 
+   - aws
+   - subnet
+   - cloud
+   - public_cloud
+tags:
+   - vpc
+   - subnet
+   - private_networking
+   - networking
+   - database
+   - ed_core
+   - ed_saas
+   - web
+   - ed
+   - aws
+   - infrastructure

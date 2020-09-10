@@ -1,0 +1,78 @@
+#!/usr/bin/env python
+
+import os
+import json
+from ed_helper_publisher.utilities import print_json
+
+terraform_state_file = os.environ.get("TERRAFORM_STATE_FILE","terraform.tfstate")
+
+with open(terraform_state_file) as json_file:
+    data = json.load(json_file)
+
+if not data:
+    print "ERROR - there is no data from {}".format(os.path.join(os.getcwd(),terraform_state_file))
+    exit(9)
+
+for resource in data["resources"]:
+    for instance in resource["instances"]:
+
+        _type = resource["type"]
+        if _type != "aws_vpc": continue
+
+        vpc_resource = {}
+        for _key,_value in resource["instances"][0]["attributes"].iteritems():
+            vpc_resource[_key] = _value
+
+        vpc_resource["name"] = vpc_resource["tags"]["Name"]
+        vpc_resource["vpc_name"] = vpc_resource["tags"]["Name"]
+        vpc_resource["vpc"] = vpc_resource["tags"]["Name"]
+        vpc_resource["tags"] = [ vpc_resource["tags"]["Name"] ]
+        vpc_resource["_id"] = vpc_resource["id"]
+        vpc_resource["vpc_id"] = vpc_resource["id"]
+        vpc_resource["resource_type"] = "vpc"
+        vpc_resource["main"] = True
+
+        if os.environ.get("AWS_DEFAULT_REGION"): 
+            vpc_resource["region"] = os.environ["AWS_DEFAULT_REGION"]
+            vpc_resource["aws_default_region"] = os.environ["AWS_DEFAULT_REGION"]
+
+        results = [ vpc_resource ]
+
+for resource in data["resources"]:
+
+    _type = resource["type"]
+    if _type == "aws_vpc": continue
+
+    for instance in resource["instances"]:
+
+        _instance = {}
+
+        for _key,_value in resource["instances"][0]["attributes"].iteritems():
+            _instance[_key] = _value
+
+        try:
+            _instance["name"] = _instance["tags"]["Name"]
+        except:
+            _instance["name"] = _instance["id"]
+
+        _instance["parent"] = vpc_resource["id"]
+        _instance["vpc_id"] = vpc_resource["id"]
+        _instance["vpc_name"] = vpc_resource["vpc_name"]
+        _instance["vpc"] = vpc_resource["vpc_name"]
+        _instance["resource_type"] = _type
+        _instance["provider"] = "aws"
+        if vpc_resource.get("region"): _instance["region"] = vpc_resource.get("region")
+
+        _instance["resource_type"] = _type.split("aws_")[1]
+        _instance["type"] = _type
+
+        results.append(_instance)
+
+print '_ed_begin_output'
+print_json(results)
+print '_ed_end_output'
+
+#for result in results:
+#    print ''
+#    print_json(result)
+

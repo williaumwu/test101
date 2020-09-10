@@ -1,0 +1,15 @@
+desc: The stack is a wrapper to used by other AWS cli related stacks
+release: 0.0.1
+categories: 
+   - aws
+   - cloud
+   - helper
+   - library
+   - public_cloud
+tags:
+   - helper
+   - library
+   - aws
+   - infrastructure
+   - public_cloud
+   - cloud

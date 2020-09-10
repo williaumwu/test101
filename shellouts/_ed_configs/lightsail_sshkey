@@ -1,0 +1,205 @@
+#!/usr/bin/env python
+#
+#This file is part of "jiffy".
+#
+#Project: jiffy: A product for building and managing infrastructure: 
+#cloud provider services, and servers and their configurations.
+#
+#Description: A product for building and managing infrastructure. 
+#This includes third party API calls for services such as virtual
+#cloud servers, load balancers, databases, and other. The product 
+#manages connectivity and appropriate communication among these 
+#aws.
+#
+#Copyright (C) Gary Leong - All Rights Reserved
+#Unauthorized copying of this file, via any medium is strictly prohibited
+#Proprietary and confidential
+#Written by Gary Leong  <gwleong@gmail.com, September 17,2015
+
+import json
+import sys
+from time import sleep
+
+from ed_helper_publisher.loggerly import ElasticDevLogger
+from ed_helper_publisher.cloud.awscli import AwsCli
+
+class Main(AwsCli):
+
+    def __init__(self,**kwargs):
+
+        AwsCli.__init__(self)
+        self.classname = 'LightsailSSHkey'
+        self.logger = ElasticDevLogger(self.classname,logcategory="cloudprovider")
+        self.logger.debug("Instantiating %s" % self.classname)
+        self.base_cmd = "aws lightsail"
+        self.product = "lightsail_ssh"
+        self.shelloutconfig = "elasticdev:::aws::lightsail_sshkey"
+
+    def exists(self,**kwargs):
+
+        add_cmd = "get-key-pair"
+
+        name = kwargs.get("name")
+        convert_to_json = kwargs.get("convert_to_json",True)
+
+        results = {"status":True}
+
+        _cmd = "{} {} --key-pair-name {}".format(self.base_cmd,add_cmd,name)
+        cmd = self.get_cmd_region(_cmd)
+        results = self.execute(cmd,convert_to_json=convert_to_json)
+
+        return results
+
+    def get(self):
+
+        results = self.exists(**self.inputargs)
+
+        if results.get("status") is None: exit(0)
+
+        if results.get("status") is False: 
+            self.cmd_failed(**self.inputargs)
+
+        self.successful_output(output=results)
+
+    def create(self):
+
+        name = self.inputargs["name"]
+        public_key = self.inputargs["public_key"]
+
+        #aws lightsail import-key-pair --key-pair-name ed_ssh_key  --public-key-base-64 
+
+        # Needs False if it finds the server
+        if self.exists(convert_to_json=False,**self.inputargs).get("status") is not False:
+            failed_message = "{} name = {} already exists".format(self.product,name)
+            self.cmd_failed(failed_message=failed_message)
+
+        add_cmd = "import-key-pair"
+        _cmd = "{} {} --key-pair-name {} --public-key-base-64 '{}'".format(self.base_cmd,add_cmd,name,public_key)
+        cmd = self.get_cmd_region(_cmd)
+
+        output = self.execute(cmd,convert_to_json=True,exit_error=True).get("output")
+        if not isinstance(output,dict): output = json.loads(output)
+        output = output["operation"]
+   
+        resource = {"raw":{}}
+        resource["raw"][self.product] = output
+        resource["_id"] = self.get_hash([name,"lightsail","public_ssh_key",self.aws_default_region])
+        resource["name"] = name
+        resource["resource_type"] = "public_ssh_key"
+        resource["provider"] = "lightsail"
+        resource["region"] = self.aws_default_region
+        resource["aws_default_region"] = self.aws_default_region
+        resource["tags"] = [ self.aws_default_region,self.product ]
+
+        resource["destroy"] = {"shelloutconfig":self.shelloutconfig}
+        resource["destroy"]["insert_env_vars"] = json.dumps(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
+        resource["destroy"]["env_vars"] = json.dumps({"NAME":name,"METHOD":"destroy","AWS_DEFAULT_REGION":self.aws_default_region})
+
+        self.successful_output(output=resource)
+
+    def destroy(self):
+
+        name = self.inputargs["name"]
+
+        self.logger.debug('Looking to destroy {} name = "{}" in "{}"'.format(self.product,
+                                                                             name,
+                                                                             self.aws_default_region))
+
+        _results = self.exists(convert_to_json=False,**self.inputargs)
+
+        if not _results.get("status"):
+            output = '{} name = "{}" in "{}" does not exists'.format(self.product,
+                                                                     self.inputargs.get("name"),
+                                                                     self.aws_default_region)
+            self.successful_output(output=output)
+
+        add_cmd = "delete-key-pair"
+        _cmd = "{} {} --key-pair-name {}".format(self.base_cmd,add_cmd,name)
+        cmd = self.get_cmd_region(_cmd)
+
+        results = self.execute(cmd,convert_to_json=None)
+
+        if results.get("status") is True: 
+            self.logger.debug('{} name "{}" deleted in {}'.format(self.product,name,self.aws_default_region))
+            self.successful_output(output=results["output"])
+        sleep(1)
+
+        failed_message = "could not delete {} name {} in {}".format(self.product,name,self.aws_default_region)
+        self.cmd_failed(failed_message=failed_message)
+
+def usage():
+
+    print """
+script + environmental variables
+
+or
+
+script + json_input (as argument)
+
+environmental variables:
+    basic:
+        AWS_ACCESS_KEY_ID  
+        AWS_SECRET_ACCESS_KEY
+        METHOD
+        AWS_DEFAULT_REGION (optional)
+
+    create:
+        NAME
+        PUBLIC_KEY
+
+    destroy:
+        NAME
+
+    get:
+        NAME
+
+       """
+    exit(4)
+
+if __name__ == '__main__':
+
+    try:
+        json_input = sys.argv[1]
+    except:
+        json_input = None
+
+    main = Main()
+
+    if json_input:
+        main.set_inputargs(json_input=json_input)
+    else:
+        set_env_vars = [ "method",
+                         "name",
+                         "public_key",
+                         "aws_default_region" ]
+
+        main.set_inputargs(set_env_vars=set_env_vars)
+   
+    method = main.inputargs.get("method")
+
+    if not method:
+        print "method/ENV VARIABLE METHOD is needed"
+        exit(4)
+
+    # Set class and region
+    main.get_region()
+
+    if method == "create":
+
+        main.check_required_inputargs(keys=["name","public_key"])
+        main.create()
+
+    elif method == "destroy":
+    
+        main.check_required_inputargs(keys=["name"])
+        main.destroy()
+
+    elif method == "get":
+
+        main.check_required_inputargs(keys=["name"])
+        main.get()
+
+    else:
+        usage()
+        print 'method "{}" not supported!'.format(method)
+        exit(4)

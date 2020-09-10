@@ -1,0 +1,60 @@
+variable "vpc_name" {
+    description = "vpc_name for the VPC"
+    default = "{{ VPC_NAME }}"
+}
+
+variable "aws_region" {
+    description = "EC2 Region for the VPC"
+    default = "{{ AWS_DEFAULT_REGION }}"
+}
+
+variable "availability_zones" {
+    description = "Availability Zones"
+    type = "list"
+    default = {{ AVAILABILITY_ZONES }}
+}
+
+variable "main_vpc_cidr" {
+    description = "CIDR of the VPC"
+    default = "{{ CIDR }}"
+}
+
+variable "cidr_subnet1" {
+    description = "cidr_subnet1"
+    default = "{{ CIDR_SUBNET1 }}"
+}
+
+variable "cidr_subnet2" {
+    description = "cidr_subnet2"
+    default = "{{ CIDR_SUBNET2 }}"
+}
+
+variable "cidr_subnet3" {
+    description = "cidr_subnet3"
+    default = "{{ CIDR_SUBNET3 }}"
+}
+
+variable "cidr_subnet4" {
+    description = "cidr_subnet4"
+    default = "{{ CIDR_SUBNET4 }}"
+}
+
+variable "cidr_subnet5" {
+    description = "cidr_subnet5"
+    default = "{{ CIDR_SUBNET5 }}"
+}
+
+variable "cidr_subnet6" {
+    description = "cidr_subnet6"
+    default = "{{ CIDR_SUBNET6 }}"
+}
+
+variable "cidr_subnet7" {
+    description = "cidr_subnet7"
+    default = "{{ CIDR_SUBNET7 }}"
+}
+
+variable "cidr_subnet8" {
+    description = "cidr_subnet8"
+    default = "{{ CIDR_SUBNET8 }}"
+}

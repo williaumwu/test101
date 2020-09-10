@@ -1,0 +1,15 @@
+variable "vpc_name" {
+    description = "vpc_name for the VPC"
+    default = "{{ VPC_NAME }}"
+}
+
+variable "aws_region" {
+    description = "EC2 Region for the VPC"
+    default = "{{ AWS_DEFAULT_REGION }}"
+}
+
+variable "main_vpc_cidr" {
+    description = "Main CIDR of the VPC"
+    default = "{{ MAIN_CIDR }}"
+}
+

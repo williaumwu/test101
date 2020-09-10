@@ -1,0 +1,258 @@
+#!/usr/bin/env python
+#
+#This file is part of "jiffy".
+#
+#Project: jiffy: A product for building and managing infrastructure: 
+#cloud provider services, and servers and their configurations.
+#
+#Description: A product for building and managing infrastructure. 
+#This includes third party API calls for services such as virtual
+#cloud servers, load balancers, databases, and other. The product 
+#manages connectivity and appropriate communication among these 
+#aws.
+#
+#Copyright (C) Gary Leong - All Rights Reserved
+#Unauthorized copying of this file, via any medium is strictly prohibited
+#Proprietary and confidential
+#Written by Gary Leong  <gwleong@gmail.com, September 17,2015
+
+import json
+import sys
+from time import sleep
+
+from ed_helper_publisher.loggerly import ElasticDevLogger
+from ed_helper_publisher.cloud.awscli import AwsCli
+from ed_helper_publisher.utilities import convert_str2json
+
+class Main(AwsCli):
+
+    def __init__(self,**kwargs):
+
+        AwsCli.__init__(self)
+        self.classname = 'APIgateway'
+        self.logger = ElasticDevLogger(self.classname,logcategory="cloudprovider")
+        self.logger.debug("Instantiating %s" % self.classname)
+        self.resource_type = "alb_target_group"
+
+    def _get_all_target_groups(self,**kwargs):
+
+        cmd = "aws elbv2 describe-target-groups --region {}".format(self.aws_default_region)
+
+        try:
+            output = self.execute(cmd,convert_to_json=True).get("output")["TargetGroups"]
+        except:
+            output = None
+    
+        return output
+
+    def _get_target_group_by_arn(self,**kwargs):
+
+        convert_to_json = kwargs.get("convert_to_json",True)
+
+        cmd = "aws elbv2 describe-target-groups --target-group-arn {} --region {}".format(kwargs["arn"],self.aws_default_region)
+
+        try:
+            output = self.execute(cmd,convert_to_json=convert_to_json).get("output")["TargetGroups"][0]
+        except:
+            output = None
+ 
+        return output
+    
+    def _get_target_group_by_name(self,**kwargs):
+
+        output = self._get_all_target_groups(**kwargs)
+        if not output: return
+
+        for item in output:
+            if kwargs["name"] != item["TargetGroupName"]: continue
+            return item
+
+    def exists(self,**kwargs):
+
+        name = kwargs.get("name")
+        arn = kwargs.get("arn")
+
+        results = {"status":True}
+
+        if arn:
+            output = self._get_target_group_by_arn(**kwargs)
+
+            if output: 
+                results["output"] = output
+                return results
+
+        elif name:
+            output = self._get_target_group_by_name(**kwargs)
+
+            if output: 
+                results["output"] = output
+                return results
+        elif not name or not arn:
+            output = self._get_all_target_groups(**kwargs)
+
+            if not output:
+                results["output"] = []
+                return results
+
+        # It fails if it gets to here.
+        results["status"] = False
+        results["output"] = output
+        failed_message = "Finding existing item(s) failed"
+        failed_message = 'Could not find item name = "{}" arn "{}"'.format(name,arn)
+        results["failed_message"] = failed_message
+        return results
+
+    def create(self):
+
+        name = self.inputargs["name"]
+        port = self.inputargs["port"]
+        protocol = self.inputargs["protocol"]
+        vpc_id = self.inputargs["vpc_id"]
+        aws_default_region = self.inputargs["aws_default_region"]
+
+        # Needs False if it finds it
+        if self.exists(convert_to_json=False,**self.inputargs).get("status") is not False:
+            failed_message = "target group name = {} already exists".format(name)
+            self.cmd_failed(failed_message=failed_message)
+
+        cmd = "aws elbv2 create-target-group --name {} --protocol {} --port {} --vpc-id {} --region {} ".format(name,
+                                                                                                                protocol,
+                                                                                                                port,
+                                                                                                                vpc_id,
+                                                                                                                aws_default_region)
+                                                                                                                                                                                
+        output = self.execute(cmd,convert_to_json=True,exit_error=True).get("output")
+        output = convert_str2json(output)["TargetGroups"][0]
+
+        vpc_id = output["VpcId"]
+        arn = output["TargetGroupArn"]
+
+        resource = {"raw":{}}
+        resource["raw"][self.resource_type] = output
+        resource["_id"] = arn
+        resource["id"] = arn
+        resource["name"] = name
+        resource["resource_type"] = self.resource_type
+        resource["provider"] = "ec2"
+        resource["region"] = self.aws_default_region
+        resource["aws_default_region"] = self.aws_default_region
+        resource["tags"] = [ self.aws_default_region, self.resource_type, "target_group", "ec2", vpc_id, name, arn ]
+        resource["vpc_id"] = vpc_id
+
+        resource["destroy"] = {"shelloutconfig":"elasticdev:::aws::alb_target_group"}
+        resource["destroy"]["insert_env_vars"] = json.dumps(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
+        resource["destroy"]["env_vars"] = json.dumps({"ARN":arn,"METHOD":"destroy","AWS_DEFAULT_REGION":self.aws_default_region})
+
+        self.successful_output(output=resource)
+
+    def destroy(self):
+
+        self.logger.debug('Looking to destroy target group name = "{}" arn "{}" in "{}"'.format(self.inputargs.get("name"),
+                                                                                                self.inputargs.get("arn"),
+                                                                                                self.aws_default_region))
+
+        _results = self.exists(convert_to_json=False,**self.inputargs)
+
+        if not _results.get("status"):
+            output = 'target group name = "{}" arn "{}" in "{}" does not exists'.format(self.inputargs.get("name"),
+                                                                                        self.inputargs.get("arn"),
+                                                                                        self.aws_default_region)
+            self.successful_output(output=output)
+
+        arn = _results["output"].get("TargetGroupArn")
+
+        if not arn:
+            failed_message = "Cannot determine cloud arn to delete"
+            self.cmd_failed(failed_message=failed_message)
+
+        cmd = "aws elbv2 delete-target-group --target-group-arn {} --region {}".format(arn,self.aws_default_region)
+
+        for retry in range(0,3):
+            results = self.execute(cmd,convert_to_json=None)
+            if results.get("status") is True: 
+                self.logger.debug('target group arn "{}" deleted'.format(arn))
+                self.successful_output(output=results["output"])
+            sleep(1)
+
+        failed_message = "could not delete target group arn {} in {}".format(arn,self.aws_default_region)
+        self.cmd_failed(failed_message=failed_message)
+
+def usage():
+
+    print """
+
+script + environmental variables
+
+or
+
+script + json_input (as argument)
+
+environmental variables:
+    basic:
+        AWS_ACCESS_KEY_ID  
+        AWS_SECRET_ACCESS_KEY
+        METHOD (create/get/destroy)
+        AWS_DEFAULT_REGION (optional)
+
+    destroy
+        ARN or NAME
+
+    create
+        NAME
+        PROTOCOL
+        PORT
+        VPC_ID
+
+       """
+    exit(4)
+
+if __name__ == '__main__':
+
+    try:
+        json_input = sys.argv[1]
+    except:
+        json_input = None
+
+    main = Main()
+
+    if json_input:
+        main.set_inputargs(json_input=json_input)
+    else:
+        set_env_vars = [ "method",
+                         "name",
+                         "protocol",
+                         "port",
+                         "vpc_id",
+                         "aws_default_region",
+                         "arn" ]
+
+        main.set_inputargs(set_env_vars=set_env_vars)
+   
+    method = main.inputargs.get("method")
+
+    if not method:
+        print "method/ENV VARIABLE METHOD is needed"
+        exit(4)
+
+    # Set class and region
+    main.get_region()
+
+    if method == "destroy":
+
+        main.check_either_inputargs(keys=["name","arn"])
+        main.destroy()
+
+    elif method == "create":
+
+        main.check_required_inputargs(keys=["name","protocol","port","vpc_id"])
+        main.create()
+
+    elif method == "get":
+    
+        main.check_either_inputargs(keys=["name","arn"])
+        main.exists()
+
+    else:
+        usage()
+        print 'method "{}" not supported!'.format(method)
+        exit(4)

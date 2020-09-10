@@ -1,0 +1,216 @@
+#!/usr/bin/env python
+#
+#This file is part of "jiffy".
+#
+#Project: jiffy: A product for building and managing infrastructure: 
+#cloud provider services, and servers and their configurations.
+#
+#Description: A product for building and managing infrastructure. 
+#This includes third party API calls for services such as virtual
+#cloud servers, load balancers, databases, and other. The product 
+#manages connectivity and appropriate communication among these 
+#aws.
+#
+#Copyright (C) Gary Leong - All Rights Reserved
+#Unauthorized copying of this file, via any medium is strictly prohibited
+#Proprietary and confidential
+#Written by Gary Leong  <gwleong@gmail.com, September 17,2015
+
+import json
+import sys
+from time import sleep
+
+from ed_helper_publisher.loggerly import ElasticDevLogger
+from ed_helper_publisher.cloud.awscli import AwsCli
+
+
+##################################NOT COMPLETED --- not working! ################################
+##################################NOT COMPLETED --- not working! ################################
+##################################NOT COMPLETED --- not working! ################################
+##################################NOT COMPLETED --- not working! ################################
+
+class Main(AwsCli):
+
+    def __init__(self,**kwargs):
+
+        AwsCli.__init__(self)
+        self.classname = 'LightsailServer'
+        self.logger = ElasticDevLogger(self.classname,logcategory="cloudprovider")
+        self.logger.debug("Instantiating %s" % self.classname)
+        self.base_cmd = "aws lightsail"
+        self.product = "lightsail_server"
+        self.provider = "lightsail"
+        self.resource_type = "firewall"
+        self.shelloutconfig = "elasticdev:::aws::lightsail_firewall"
+
+    def create(self):
+
+        hostname = self.inputargs["hostname"]
+        fromPort = int(self.inputargs["fromPort"])
+        toPort = int(self.inputargs["toPort"])
+        protocol = self.inputargs.get("protocol","tcp")
+
+        # Needs False if it finds the server
+        if self.exists(convert_to_json=False,**self.inputargs).get("status") is not False:
+            failed_message = "{} name = {} already exists".format(self.product,name)
+            self.cmd_failed(failed_message=failed_message)
+
+        add_cmd = "open-instance-public-ports"
+        _cmd = "{} {} --instance-name {} --blueprint-id {} --bundle-id {} --availability-zone {} --key-pair {}".format(self.base_cmd,
+                                                                                                                       add_cmd,
+                                                                                                                       name, 
+                                                                                                                       blueprint_id, 
+                                                                                                                       bundle_id, 
+                                                                                                                       availability_zone, 
+                                                                                                                       key)
+        cmd = self.get_cmd_region(_cmd)
+
+        self.execute(cmd,convert_to_json=True,exit_error=True)
+        self.logger.debug("Sleep 5 secs. Waiting for server to run ...")
+        sleep(5)
+
+        for count in range(1,30):
+            output = self.exists(convert_to_json=True,**self.inputargs)["output"].get("instance")
+            status = output["state"]["name"]
+            if status == "running": break
+            self.logger.debug("Waiting for server to run ...")
+            sleep(5)
+   
+        arn = output["arn"]
+        resource = {"raw":{}}
+        resource["raw"][self.product] = output
+        resource["private_ip"] = output["privateIpAddress"]
+        resource["public_ip"] = output["publicIpAddress"]
+        resource["name"] = name
+        resource["bundle_id"] = bundle_id
+        resource["blueprint_id"] = blueprint_id
+        resource["availability_zone"] = availability_zone
+        resource["key"] = key
+        resource["_id"] = arn
+        resource["arn"] = arn
+        resource["id"] = arn
+        resource["name"] = name
+        resource["resource_type"] = self.resource_type
+        resource["provider"] = self.provider
+        resource["region"] = self.aws_default_region
+        resource["aws_default_region"] = self.aws_default_region
+        resource["tags"] = [ self.aws_default_region, self.product, self.provider ]
+
+        resource["destroy"] = {"shelloutconfig":self.shelloutconfig}
+        resource["destroy"]["insert_env_vars"] = json.dumps(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
+        resource["destroy"]["env_vars"] = json.dumps({"NAME":name,"METHOD":"destroy","AWS_DEFAULT_REGION":self.aws_default_region})
+
+        self.successful_output(output=resource)
+
+    def destroy(self):
+
+        name = self.inputargs["name"]
+
+        self.logger.debug('Looking to destroy {} name = "{}" in "{}"'.format(self.product,
+                                                                             name,
+                                                                             self.aws_default_region))
+
+        _results = self.exists(convert_to_json=False,**self.inputargs)
+
+        if not _results.get("status"):
+            output = '{} name = "{}" in "{}" does not exists'.format(self.product,
+                                                                     self.inputargs.get("name"),
+                                                                     self.aws_default_region)
+            self.successful_output(output=output)
+
+        add_cmd = "close-instance-public-ports"
+        _cmd = "{} {} --instance-name {}".format(self.base_cmd,add_cmd,name)
+        cmd = self.get_cmd_region(_cmd)
+
+        results = self.execute(cmd,convert_to_json=None)
+
+        if results.get("status") is True: 
+            self.logger.debug('{} name "{}" deleted in {}'.format(self.product,name,self.aws_default_region))
+            self.successful_output(output=results["output"])
+        sleep(1)
+
+        failed_message = "could not delete {} name {} in {}".format(self.product,name,self.aws_default_region)
+        self.cmd_failed(failed_message=failed_message)
+
+def usage():
+
+    print """
+script + environmental variables
+
+or
+
+script + json_input (as argument)
+
+environmental variables:
+    basic:
+        AWS_ACCESS_KEY_ID  
+        AWS_SECRET_ACCESS_KEY
+        METHOD
+        AWS_DEFAULT_REGION (optional)
+
+    create:
+        NAME
+        BLUEPRINT_ID (optional)
+        BUNDLE_ID (optional)
+        AVAILABILITY_ZONE (optional)
+        KEY
+
+    destroy:
+        NAME
+
+    get:
+        NAME
+
+       """
+    exit(4)
+
+if __name__ == '__main__':
+
+    try:
+        json_input = sys.argv[1]
+    except:
+        json_input = None
+
+    main = Main()
+
+    if json_input:
+        main.set_inputargs(json_input=json_input)
+    else:
+        set_env_vars = [ "method",
+                         "name",
+                         "blueprint_id",
+                         "bundle_id",
+                         "availability_zone",
+                         "key",
+                         "aws_default_region" ]
+
+        main.set_inputargs(set_env_vars=set_env_vars)
+   
+    method = main.inputargs.get("method")
+
+    if not method:
+        print "method/ENV VARIABLE METHOD is needed"
+        exit(4)
+
+    # Set class and region
+    main.get_region()
+
+    if method == "create":
+
+        main.check_required_inputargs(keys=["name","key"])
+        main.create()
+
+    elif method == "destroy":
+    
+        main.check_required_inputargs(keys=["name"])
+        main.destroy()
+
+    elif method == "get":
+
+        main.check_required_inputargs(keys=["name"])
+        main.get()
+
+    else:
+        usage()
+        print 'method "{}" not supported!'.format(method)
+        exit(4)

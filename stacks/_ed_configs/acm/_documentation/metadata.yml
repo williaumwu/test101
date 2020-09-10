@@ -1,0 +1,15 @@
+desc: The stack that creates an apigateway on aws.
+release: 0.0.1
+categories: 
+   - aws
+   - apigateway
+   - cloud
+   - public_cloud
+tags:
+   - api
+   - apigateway
+   - aws
+   - infrastructure
+   - featured_infrastructure
+   - cloud
+   - public_cloud

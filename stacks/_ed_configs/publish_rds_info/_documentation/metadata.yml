@@ -1,0 +1,16 @@
+desc: The stack publishes the information for RDS.
+release: 0.0.1
+categories: 
+   - aws
+   - rds
+   - database
+   - cloud
+   - public_cloud
+tags:
+   - rds
+   - database
+   - aws
+   - infrastructure
+   - featured_infrastructure
+   - cloud
+   - public_cloud

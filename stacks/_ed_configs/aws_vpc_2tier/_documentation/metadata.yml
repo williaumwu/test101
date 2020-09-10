@@ -1,0 +1,19 @@
+desc: Creates a secure VPC for 2 tier web application.
+release: 0.0.2
+categories: 
+   - aws
+   - cloud
+   - public_cloud
+tags:
+   - vpc
+   - private_networking
+   - networking
+   - database
+   - ed_core
+   - ed_saas
+   - web
+   - ed
+   - aws
+   - infrastructure
+   - featured_infrastructure
+   - featured

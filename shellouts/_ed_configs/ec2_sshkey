@@ -1,0 +1,194 @@
+#!/usr/bin/env python
+#
+
+import os
+import json
+import sys
+from time import sleep
+
+from ed_helper_publisher.utilities import id_generator
+from ed_helper_publisher.loggerly import ElasticDevLogger
+from ed_helper_publisher.cloud.boto_helper import EC2_connections
+from ed_helper_publisher.resource_manage import ResourceCmdHelper
+
+class Main(EC2_connections,ResourceCmdHelper):
+
+    def __init__(self,**kwargs):
+
+        EC2_connections.__init__(self)
+        ResourceCmdHelper.__init__(self)
+
+        self.classname = 'Ec2Keymgmt'
+        self.logger = ElasticDevLogger(self.classname,logcategory="cloudprovider")
+        self.logger.debug("Instantiating %s" % self.classname)
+        self.resource_type = "ssh_key"
+        self.provider = "ec2"
+        #self.shelloutconfig = "elasticdev:::aws::ec2_sshkey:5"
+        self.shelloutconfig = "elasticdev:::aws::ec2_sshkey"
+        self._set_conn()
+
+    def create(self):
+        
+        public_key = self.inputargs["public_key"]
+        name = self.inputargs.get("name")
+        if not name: name = id_generator(size=24)
+
+        output = {'active':True}
+        output["current"] = True
+        output["phase"] = "Created"
+        output["resource_type"] = self.resource_type
+        output["provider"] = "ec2"
+
+        # We need to make name the id to make sure it's unique
+        # in the resources table
+        _id = self.get_hash(name)
+        output["name"] = name
+        output["id"] = _id
+        output["_id"] = _id
+
+        _conn = self.conn.import_key_pair(name,public_key)
+        output["region"] = _conn.region.name
+        output["aws_default_region"] = self.aws_default_region
+
+        output["destroy"] = {"shelloutconfig":self.shelloutconfig}
+        output["destroy"]["insert_env_vars"] = json.dumps(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
+        output["destroy"]["env_vars"] = json.dumps({"NAME":name,"METHOD":"destroy","AWS_DEFAULT_REGION":_conn.region.name})
+
+        # {
+        #    "_id": "ed_ssh_key", 
+        #    "active": true, 
+        #    "cluster": null, 
+        #    "current": true, 
+        #    "date_entered": "1573758504", 
+        #    "hash_check": "d6cd20557384a273f00539ed65641812", 
+        #    "id": "ed_ssh_key", 
+        #    "instance": null, 
+        #    "job_id": null, 
+        #    "job_instance_id": null, 
+        #    "name": "ed_ssh_key", 
+        #    "phase": "Created", 
+        #    "provider": "ec2", 
+        #    "region": "us-east-1", 
+        #    "resource_type": "ssh_key", 
+        #    "run_id": null, 
+        #    "schedule_id": null, 
+        #    "tags": [
+        #        "ed_ssh_key"
+        #    ], 
+        #    "timestamp": "2019-11-14-19-8-24"
+        #}
+
+        self.successful_output(output=output)
+
+    def destroy(self):
+
+        name = self.inputargs["name"]
+        self.conn.delete_key_pair(name,dry_run=False)
+
+        return self.successful_output(output={"name":name})
+
+    def exists(self,**kwargs):
+
+        name = kwargs["name"]
+
+        region_key_info = self.region_info[self.aws_default_region].get_all_key_pairs()
+
+        for output in region_key_info:
+            if name != output.name: continue
+            results = {"status":True}
+            results["output"] = output
+            return results
+
+        return {"status":None}
+
+    def get(self):
+
+        results = self.exists(**self.inputargs)
+        if results.get("status") is None: exit(0)
+        if results.get("status") is False: self.cmd_failed(**self.inputargs)
+
+        self.successful_output(output=results["output"])
+
+    def list(self):
+
+        region_key_info = self.region_info[self.aws_default_region].get_all_key_pairs()
+
+        if not region_key_info: return
+
+        for i in region_key_info:
+            values = {'name':i.name}
+            values['fingerprint'] = i.fingerprint
+            values['region'] = self.aws_default_region
+
+def usage():
+
+    print """
+script + environmental variables
+
+or
+
+script + json_input (as argument)
+
+environmental variables:
+    basic:
+        AWS_ACCESS_KEY_ID  
+        AWS_SECRET_ACCESS_KEY
+        METHOD
+        AWS_DEFAULT_REGION (optional)
+
+    create:
+        NAME
+        PUBLIC_KEY
+
+    destroy:
+        NAME
+
+    get:
+        NAME 
+
+       """
+    exit(4)
+
+if __name__ == '__main__':
+
+    try:
+        json_input = sys.argv[1]
+    except:
+        json_input = None
+
+    main = Main()
+
+    if json_input:
+        main.set_inputargs(json_input=json_input)
+    else:
+        set_env_vars = [ "method",
+                         "name",
+                         "public_key",
+                         "aws_default_region" ]
+
+        main.set_inputargs(set_env_vars=set_env_vars)
+   
+    method = main.inputargs.get("method")
+
+    if not method:
+        print "method/ENV VARIABLE METHOD is needed"
+        exit(4)
+
+    if method == "create":
+
+        main.check_required_inputargs(keys=["name","public_key"])
+        main.create()
+
+    elif method == "destroy":
+    
+        main.check_required_inputargs(keys=["name"])
+        main.destroy()
+
+    elif method == "get":
+        main.check_required_inputargs(keys=["name"])
+        main.get()
+
+    else:
+        usage()
+        print 'method "{}" not supported!'.format(method)
+        exit(4)

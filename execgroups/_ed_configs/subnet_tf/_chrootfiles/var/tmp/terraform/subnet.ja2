@@ -1,0 +1,15 @@
+provider "aws" {
+    region = "{{ AWS_DEFAULT_REGION }}"
+}
+
+# Subnets
+resource "aws_subnet" "{{ SUBNET_LABEL }}" {
+  vpc_id     = "{{ VPC_ID }}"
+  cidr_block = "{{ CIDR_SUBNET }}"
+  availability_zone = "{{ AVAILABILITY_ZONE }}"
+
+  tags = {
+    Name = "{{ SUBNET_NAME }}"
+    Label = "{{ SUBNET_LABEL }}"
+    }
+}

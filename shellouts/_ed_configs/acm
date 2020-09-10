@@ -1,0 +1,288 @@
+#!/usr/bin/env python
+#
+#This file is part of "jiffy".
+#
+#Project: jiffy: A product for building and managing infrastructure: 
+#cloud provider services, and servers and their configurations.
+#
+#Description: A product for building and managing infrastructure. 
+#This includes third party API calls for services such as virtual
+#cloud servers, load balancers, databases, and other. The product 
+#manages connectivity and appropriate communication among these 
+#aws.
+#
+#Copyright (C) Gary Leong - All Rights Reserved
+#Unauthorized copying of this file, via any medium is strictly prohibited
+#Proprietary and confidential
+#Written by Gary Leong  <gwleong@gmail.com, September 17,2015
+
+import json
+import sys
+from time import sleep
+
+from ed_helper_publisher.loggerly import ElasticDevLogger
+from ed_helper_publisher.utilities import convert_str2json
+from ed_helper_publisher.cloud.awscli import AwsCli
+
+class Main(AwsCli):
+
+    def __init__(self,**kwargs):
+
+        AwsCli.__init__(self)
+        self.classname = 'ACM'
+        self.logger = ElasticDevLogger(self.classname,logcategory="cloudprovider")
+        self.logger.debug("Instantiating %s" % self.classname)
+
+    def exists(self,**kwargs):
+
+        arn = kwargs["arn"]
+        convert_to_json = kwargs.get("convert_to_json",True)
+        exit_error = kwargs.get("exit_error",True)
+
+        cmd = "aws acm get-certificate --certificate-arn {} --region {}".format(arn,self.aws_default_region)
+
+        results = self.execute(cmd,convert_to_json=convert_to_json,exit_error=exit_error)
+        if results.get("status"): return results
+
+        failed_message = 'Could not find item arn = "{}"'.format(arn)
+        results["failed_message"] = failed_message
+
+        return results
+
+    def list(self):
+
+        cmd = "aws acm list-certificates --region {}".format(self.aws_default_region)
+
+        output = self.execute(cmd,convert_to_json=True,exit_error=True).get("output")
+
+        results = {"status":True}
+        results["output"] = output
+
+        return results
+
+    def get(self):
+
+        arn = self.inputargs.get("arn")
+        name = self.inputargs.get("name")
+
+        if arn:
+            results = self.exists(exit_error=True,**self.inputargs)
+        elif name:
+            results = self._name_exists(name)
+        else:
+            results = self.list()
+
+        if results.get("status"): 
+            self.successful_output(output=results["output"])
+
+        return 
+
+    def _name_exists(self,name=None):
+
+        '''
+        we check if the name exist as a tag in aws
+        '''
+
+        output = self.list()["output"]
+        if not output: return 
+
+        arns = {}
+
+        for ecert in output["CertificateSummaryList"]:
+            arns[ecert["CertificateArn"]] = ecert
+
+        for arn in arns:
+
+            cmd = "aws acm list-tags-for-certificate --certificate-arn {} --region {}".format(arn,self.aws_default_region)
+            tags = self.execute(cmd,convert_to_json=True,exit_error=True)["output"]["Tags"]
+
+            for tag in tags: 
+                if tag["Key"] != "name": continue
+                if tag["Value"] == name: return arns[arn]
+               
+        return 
+
+    def _get_cert_from_aws(self,arn):
+
+        output = self.list()["output"]
+        if not output: return 
+
+        for ecert in output["CertificateSummaryList"]:
+            if arn != ecert["CertificateArn"]: continue
+            return ecert
+
+        return 
+
+    def create(self):
+
+        name = self.inputargs["name"]
+        clobber = self.inputargs.get("clobber")
+
+        cert_file = 'file://{}'.format(self.inputargs["cert_file"])
+        prv_key = 'file://{}'.format(self.inputargs["prv_key"])
+        cert_chain = 'file://{}'.format(self.inputargs["cert_chain"])
+
+        output = self._name_exists(name=name)
+        _exists = None
+
+        if output:
+
+            if not clobber: 
+                self.logger.warn('name "{}" already exists and clobber not set. Skipping ...'.format(name))
+                output = {"exists":True}
+                self.successful_output(output=output)
+
+            self.logger.warn('name "{}" already exists'.format(name))
+            arn = output["CertificateArn"]
+            domain_name = output["DomainName"]
+            _exists = True
+        else:
+            cmd = "aws acm import-certificate --certificate '{}' \
+                                              --private-key '{}' \
+                                              --region '{}' \
+                                              --certificate-chain '{}'".format(cert_file,prv_key,self.aws_default_region,cert_chain)
+
+            output = self.execute(cmd,convert_to_json=True,exit_error=True).get("output")
+
+            if not isinstance(output,dict): 
+                _cstatus = convert_str2json(output)
+                if _cstatus: output = _cstatus
+
+            arn = output["CertificateArn"]
+            output = self._get_cert_from_aws(arn=arn)
+            domain_name = output["DomainName"]
+
+        cmd = 'aws acm add-tags-to-certificate --certificate-arn {} --tags Key=name,Value={} --region {}'.format(arn,name,self.aws_default_region)
+        self.execute(cmd,convert_to_json=None,exit_error=False).get("output")
+
+        resource = {"raw":{}}
+        resource["raw"]["output"] = output
+        resource["arn"] = arn
+        resource["id"] = arn
+        resource["name"] = name
+        resource["domain_name"] = domain_name
+        resource["resource_type"] = "certificate"
+        resource["provider"] = "aws"
+        resource["region"] = self.aws_default_region
+        resource["aws_default_region"] = self.aws_default_region
+        resource["provider_label"] = "acm"
+        resource["tags"] = [ "acm", domain_name, name ]
+        if _exists: resource["exists"] = True
+
+        resource["destroy"] = {"shelloutconfig":"elasticdev:::aws::acm"}
+        resource["destroy"]["insert_env_vars"] = json.dumps(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"])
+        resource["destroy"]["env_vars"] = json.dumps({"ARN":arn,"METHOD":"destroy","AWS_DEFAULT_REGION":self.aws_default_region})
+        #resource["destroy"]["json_args"] = json.dumps({"arn":arn,"method":"destroy","region":self.aws_default_region})
+
+        self.successful_output(output=resource)
+
+    def destroy(self):
+
+        self.logger.debug('Looking to destroy acm arn "{}"'.format(self.inputargs.get("arn")))
+
+        _results = self.exists(convert_to_json=False,exit_error=None,**self.inputargs)
+
+        if not _results.get("status"):
+            output = 'acm arn "{}" does not exists'.format(self.inputargs.get("arn"))
+            self.successful_output(output=output)
+
+        cmd = "aws acm delete-certificate --certificate-arn {} --region {}".format(self.inputargs["arn"],self.inputargs["aws_default_region"])
+
+        for retry in range(0,3):
+            results = self.execute(cmd,convert_to_json=None)
+            if results.get("status") is True: 
+                output = 'acm arn "{}" deleted at "{}"'.format(self.inputargs["arn"],self.inputargs["aws_default_region"])
+                self.successful_output(output=output)
+            sleep(1)
+
+        failed_message = "could not delete acm arn {}".format(self.inputargs["arn"])
+        self.cmd_failed(failed_message=failed_message)
+
+def usage():
+
+    print """
+script + environmental variables
+
+or
+
+script + json_input (as argument)
+
+environmental variables:
+    basic:
+        AWS_ACCESS_KEY_ID  
+        AWS_SECRET_ACCESS_KEY
+        METHOD (create/get/destroy)
+        AWS_DEFAULT_REGION (optional)
+
+    create:
+        NAME
+        CERT_FILE
+        PRV_KEY
+        CERT_CHAIN
+        CLOBBER (optional)
+
+    destroy:
+        ARN
+
+    get:
+        ARN (optional)
+        NAME (optional)
+
+       """
+    exit(4)
+
+if __name__ == '__main__':
+
+    try:
+        json_input = sys.argv[1]
+    except:
+        json_input = None
+
+    main = Main()
+
+    if json_input:
+        main.set_inputargs(json_input=json_input)
+    else:
+        set_env_vars = [ "method",
+                         "name",
+                         "aws_default_region",
+                         "arn",
+                         "cert_file",
+                         "prv_key",
+                         "cert_chain",
+                         "clobber" ]
+
+        main.set_inputargs(set_env_vars=set_env_vars)
+
+    method = main.inputargs.get("method")
+
+    if not method:
+        print "method/ENV VARIABLE METHOD is needed"
+        exit(4)
+
+    # Set class and region
+    main.get_region()
+
+    if method == "create":
+
+        keys = [ "name",
+                 "cert_file",
+                 "prv_key",
+                 "cert_chain" ]
+
+        main.check_required_inputargs(keys=keys)
+        main.create()
+
+    elif method == "destroy":
+
+        main.check_required_inputargs(keys=["arn"])
+        main.destroy()
+
+    elif method == "get":
+
+        main.get()
+
+    else:
+        usage()
+        print 'method "{}" not supported!'.format(method)
+        exit(4)
